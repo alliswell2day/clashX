@@ -33,7 +33,7 @@ class ProxyConfigHelperManager {
        
         if !vaildHelper() {
             if (!showInstallHelperAlert()) {
-                exit(0)
+                NSApplication.shared.terminate(nil)
             }
             
             if (FileManager.default.fileExists(atPath: targetPath)) {
@@ -57,14 +57,28 @@ class ProxyConfigHelperManager {
     
     static func checkConfigDir() {
         var isDir : ObjCBool = true
+        
         if !FileManager.default.fileExists(atPath: kProxyConfigFolder, isDirectory:&isDir) {
-            try? FileManager.default.createDirectory(atPath: kProxyConfigFolder, withIntermediateDirectories: false, attributes: nil)
+            do {
+                try FileManager.default.createDirectory(atPath: kProxyConfigFolder, withIntermediateDirectories: true, attributes: nil)
+            } catch {
+                showCreateConfigDirFailAlert()
+            }
         }
     }
     
     static func checkMMDB() {
         let fileManage = FileManager.default
         let destMMDBPath = "\(kProxyConfigFolder)/Country.mmdb"
+        
+        // Remove old mmdb file after version update.
+        if fileManage.fileExists(atPath: destMMDBPath) {
+            if AppVersionUtil.hasVersionChanged || AppVersionUtil.isFirstLaunch {
+                try? fileManage.removeItem(atPath: destMMDBPath)
+            }
+        }
+        
+        
         if !fileManage.fileExists(atPath: destMMDBPath) {
             if let mmdbPath = Bundle.main.path(forResource: "Country", ofType: "mmdb") {
                 try? fileManage.copyItem(at: URL(fileURLWithPath: mmdbPath), to: URL(fileURLWithPath: destMMDBPath))
@@ -102,6 +116,17 @@ class ProxyConfigHelperManager {
         alert.addButton(withTitle: "Install".localized())
         alert.addButton(withTitle: "Quit".localized())
         return alert.runModal() == .alertFirstButtonReturn
+    }
+    
+    static func showCreateConfigDirFailAlert() {
+        let alert = NSAlert()
+        alert.messageText = """
+        ClashX fail to create ~/.config/clash folder. Please check privileges or manually create folder and restart ClashX.
+        """.localized()
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "Quit".localized())
+        alert.runModal()
+        NSApplication.shared.terminate(nil)
     }
 
 }

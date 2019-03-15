@@ -43,6 +43,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var disposeBag = DisposeBag()
     var statusItemView:StatusItemView!
     
+    var isSpeedTesting = false
+
+    
     func applicationDidFinishLaunching(_ notification: Notification) {
         signal(SIGPIPE, SIG_IGN)
         
@@ -51,14 +54,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem.menu = statusMenu
         
         statusItemView = StatusItemView.create(statusItem: statusItem)
+        statusItemView.frame = CGRect(x: 0, y: 0, width: 65, height: 22)
         statusMenu.delegate = self
         
         // crash recorder
         failLaunchProtect()
         registCrashLogger()
         
-        // prepare for launch
-        ConfigFileManager.upgardeIniIfNeed()
+        // install proxy helper
+        _ = ProxyConfigHelperManager.install()
         ConfigFileManager.copySampleConfigIfNeed()
         ConfigManager.shared.refreshApiInfo()
         
@@ -68,16 +72,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         setupData()
         actionUpdateConfig(self)
         updateLoggingLevel()
-
+        hideFunctionIfNeed()
+        
         // check config vaild via api
         ConfigFileManager.checkFinalRuleAndShowAlert()
-
-        // hide dev functions
-        setupDashboard()
         
-        // install proxy helper
-        _ = ProxyConfigHelperManager.install()
-
     }
 
 
@@ -97,14 +96,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         ConfigFileManager.shared.watchConfigFile(configName: ConfigManager.selectConfigName)
         
         NotificationCenter.default.rx.notification(kShouldUpDateConfig).bind {
-            [unowned self] (note)  in
+            [weak self] (note)  in
+            guard let self = self else {return}
             self.actionUpdateConfig(nil)
         }.disposed(by: disposeBag)
         
         
         ConfigManager.shared
             .showNetSpeedIndicatorObservable
-            .bind {[unowned self] (show) in
+            .bind {[weak self] (show) in
+                guard let self = self else {return}
                 self.showNetSpeedIndicatorMenuItem.state = (show ?? true) ? .on : .off
                 let statusItemLength:CGFloat = (show ?? true) ? 65 : 25
                 self.statusItem.length = statusItemLength
@@ -116,8 +117,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         ConfigManager.shared
             .proxyPortAutoSetObservable
             .distinctUntilChanged()
-            .bind{ [unowned self]
+            .bind{ [weak self]
                 en in
+                guard let self = self else {return}
                 let enable = en ?? false
                 self.proxySettingMenuItem.state = enable ? .on : .off
             }.disposed(by: disposeBag)
@@ -142,7 +144,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 self.proxyModeMenuItem.title = "\("Proxy Mode".localized()) (\(config.mode.rawValue.localized()))"
                 
                 self.updateProxyList()
-                self.updateConfigFiles()
                 
                 if (old?.port != config.port && ConfigManager.shared.proxyPortAutoSet) {
                     _ = ProxyConfigHelperManager.setUpSystemProxy(port: config.port,socksPort: config.socketPort)
@@ -159,7 +160,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             .isRunningVariable
             .asObservable()
             .distinctUntilChanged()
-            .bind { [unowned self] _ in
+            .bind { [weak self] _ in
+                guard let self = self else {return}
                 self.updateProxyList()
         }.disposed(by: disposeBag)
         
@@ -173,11 +175,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
   
     }
     
-    func setupDashboard() {
-        if (!ClashWebViewContoller.enableDashBoard()) {
-            statusMenu.removeItem(dashboardMenuItem)
+    func hideFunctionIfNeed() {
+        if #available(OSX 10.11, *) {
+            // pass
+        } else {
+            dashboardMenuItem.isHidden = true
         }
     }
+
+
     
     func updateProxyList() {
         func updateProxyList(withMenus menus:[NSMenuItem]) {
@@ -220,6 +226,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     
     func startProxy() {
         if (ConfigManager.shared.isRunning){return}
+    
+        // setup ui config first
+        if let htmlPath = Bundle.main.path(forResource: "index", ofType: "html", inDirectory: "dashboard") {
+            let uiPath = URL(fileURLWithPath: htmlPath).deletingLastPathComponent().path
+            let path = String(uiPath)
+            let length = path.count + 1
+            let buffer = UnsafeMutablePointer<Int8>.allocate(capacity: length)
+            (path as NSString).getCString(buffer, maxLength: length, encoding: String.Encoding.utf8.rawValue)
+            setUIPath(buffer)
+        }
+        
         print("Trying start proxy")
         if let cstring = run() {
             let error = String(cString: cstring)
@@ -229,8 +246,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             } else {
                 ConfigManager.shared.isRunning = true
                 self.resetStreamApi()
+                self.dashboardMenuItem.isEnabled = true
             }
         }
+        
+        
 
     }
     
@@ -263,7 +283,8 @@ extension AppDelegate {
     
     @IBAction func actionAllowFromLan(_ sender: NSMenuItem) {
         ApiRequest.updateAllowLan(allow: !ConfigManager.allowConnectFromLan) {
-            [unowned self] in
+            [weak self] in
+            guard let self = self else {return}
             self.syncConfig()
             ConfigManager.allowConnectFromLan = !ConfigManager.allowConnectFromLan
         }
@@ -321,7 +342,30 @@ extension AppDelegate {
     }
     
     @IBAction func actionSpeedTest(_ sender: Any) {
-        
+        if isSpeedTesting {
+            NSUserNotificationCenter.default.postSpeedTestingNotice()
+            return
+        }
+        NSUserNotificationCenter.default.postSpeedTestBeginNotice()
+
+        isSpeedTesting = true
+        ApiRequest.getAllProxyList { [weak self] proxies in
+            let testGroup = DispatchGroup()
+            
+            for proxyName in proxies {
+                testGroup.enter()
+                ApiRequest.getProxyDelay(proxyName: proxyName) { delay in
+                    testGroup.leave()
+                    SpeedDataRecorder.shared.setDelay(proxyName, delay: delay)
+                }
+            }
+            testGroup.notify(queue: DispatchQueue.main, execute: {
+                NSUserNotificationCenter.default.postSpeedTestFinishNotice()
+                self?.syncConfig()
+                self?.isSpeedTesting = false
+            })
+        }
+
         
     }
     
@@ -350,7 +394,8 @@ extension AppDelegate {
         startProxy()
         guard ConfigManager.shared.isRunning else {return}
         let notifaction = self != (sender as? NSObject)
-        ApiRequest.requestConfigUpdate() { [unowned self] error in
+        ApiRequest.requestConfigUpdate() { [weak self] error in
+            guard let self = self else {return}
             if (error == nil) {
                 self.syncConfig()
                 self.resetStreamApi()
@@ -381,9 +426,7 @@ extension AppDelegate {
         resetStreamApi()
     }
     
-    @IBAction func actionImportBunchJsonFile(_ sender: NSMenuItem) {
-        ConfigFileManager.importConfigFile()
-    }
+
     
     
     @IBAction func actionSetRemoteConfigUrl(_ sender: Any) {
@@ -393,31 +436,6 @@ extension AppDelegate {
     
     @IBAction func actionUpdateRemoteConfig(_ sender: Any) {
         RemoteConfigManager.updateConfigIfNeed()
-    }
-    
-    @IBAction func actionImportConfigFromSSURL(_ sender: NSMenuItem) {
-        let pasteBoard = NSPasteboard.general.string(forType: NSPasteboard.PasteboardType.string)
-        if let proxyModel = ProxyServerModel(urlStr: pasteBoard ?? "") {
-            ConfigFileManager.addProxyToConfig(proxy: proxyModel)
-        } else {
-            NSUserNotificationCenter.default.postImportConfigFromUrlFailNotice(urlStr: pasteBoard ?? "empty")
-        }
-    }
-    
-    @IBAction func actionScanQRCode(_ sender: NSMenuItem) {
-        if let urls = QRCodeUtil.ScanQRCodeOnScreen() {
-            for url in urls {
-                if let proxyModel = ProxyServerModel(urlStr: url) {
-                    ConfigFileManager.addProxyToConfig(proxy: proxyModel)
-                } else {
-                    NSUserNotificationCenter
-                        .default
-                        .postImportConfigFromUrlFailNotice(urlStr: url)
-                }
-            }
-        }else {
-            NSUserNotificationCenter.default.postQRCodeNotFoundNotice()
-        }
     }
 }
 
@@ -476,7 +494,12 @@ extension AppDelegate {
 // MARK: NSMenuDelegate
 extension AppDelegate:NSMenuDelegate {
     func menuWillOpen(_ menu: NSMenu) {
-        self.syncConfig()
     }
+    
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        syncConfig()
+        updateConfigFiles()
+    }
+
 }
 

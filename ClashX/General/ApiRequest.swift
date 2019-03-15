@@ -17,6 +17,7 @@ class ApiRequest{
         let configuration = URLSessionConfiguration.default
         configuration.timeoutIntervalForRequest = 604800
         configuration.timeoutIntervalForResource = 604800
+        configuration.httpMaximumConnectionsPerHost = 30
         alamoFireManager = Alamofire.SessionManager(configuration: configuration)
     }
     
@@ -52,8 +53,11 @@ class ApiRequest{
         req("/configs").responseData{
             res in
             guard let data = res.result.value else {return}
-            let config = ClashConfig.fromData(data)
-            completeHandler(config)
+            if let config = ClashConfig.fromData(data) {
+                completeHandler(config)
+            } else {
+                NSUserNotificationCenter.default.post(title: "Error", info: "Get clash config failed")
+            }
         }
     }
     
@@ -66,7 +70,7 @@ class ApiRequest{
                 ConfigManager.shared.isRunning = true
                 callback(nil)
             } else {
-                let err = JSON(res.result.value as Any)["message"].string ?? "unknown"
+                let err = JSON(res.result.value as Any)["message"].string ?? "Error occoured, Please try to fix it by restarting ClashX. "
                 if err.contains("no such file or directory") {
                     ConfigManager.selectConfigName = "config"
                 } else {
@@ -142,7 +146,7 @@ class ApiRequest{
         req("/rules").responseData { res in
             guard let data = res.result.value else {return}
             let rule = ClashRuleResponse.fromData(data)
-            completeHandler(rule.rules)
+            completeHandler(rule.rules ?? [])
         }
     }
 }
@@ -166,8 +170,9 @@ extension ApiRequest {
                     if let jsonData = try? JSONSerialization.jsonObject(with: data) as? [String:Int] {
                         callback(jsonData?["up"] ?? 0, jsonData?["down"] ?? 0)
                     }
-                }.response { res in
+                }.response {[weak self] res in
                     guard let err = res.error else {return}
+                    guard let self = self else {return}
                     if (err as NSError).code != -999 {
                         Logger.log(msg: "Traffic Api.\(err.localizedDescription)")
                         // delay 1s,prevent recursive
@@ -198,8 +203,9 @@ extension ApiRequest {
                         callback(type,payload)
                     }
                 }
-                .response { res in
+                .response { [weak self] res in
                     guard let err = res.error else {return}
+                    guard let self = self else {return}
                     if (err as NSError).code != -999 {
                         Logger.log(msg: "Loging api disconnected.\(err.localizedDescription)")
                         // delay 1s,prevent recursive

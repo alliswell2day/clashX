@@ -1,23 +1,14 @@
 package main // import "github.com/yichengchen/clashX/ClashX"
 import (
 	"C"
+	"os"
 
-	"github.com/Dreamacro/clash/config"
-	Cc "github.com/Dreamacro/clash/constant"
 	"github.com/Dreamacro/clash/hub"
-)
-
-var (
-	homedir string
+	"github.com/Dreamacro/clash/hub/route"
 )
 
 //export run
 func run() *C.char {
-
-	if err := config.Init(Cc.Path.HomeDir()); err != nil {
-		return C.CString(err.Error())
-	}
-
 	if err := hub.Parse(); err != nil {
 		return C.CString(err.Error())
 	}
@@ -25,6 +16,12 @@ func run() *C.char {
 	return C.CString("success")
 }
 
-func main() {
+//export setUIPath
+func setUIPath(path *C.char) {
+	route.SetUIPath(C.GoString(path))
+}
 
+func main() {
+	// enable tls 1.3 and remove when go 1.13
+	os.Setenv("GODEBUG", os.Getenv("GODEBUG")+",tls13=1")
 }

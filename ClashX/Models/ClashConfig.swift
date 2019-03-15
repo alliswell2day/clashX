@@ -18,6 +18,7 @@ enum ClashLogLevel:String,Codable {
     case warning = "warning"
     case error = "error"
     case debug = "debug"
+    case silent = "silent"
     case unknow = "unknow"
 }
 
@@ -32,10 +33,10 @@ class ClashConfig:Codable {
         case port, socketPort = "socks-port", allowLan = "allow-lan", mode, logLevel = "log-level"
     }
     
-    static func fromData(_ data:Data)->ClashConfig{
+    static func fromData(_ data:Data)->ClashConfig?{
         let decoder = JSONDecoder()
         let model = try? decoder.decode(ClashConfig.self, from: data)
-        return model!
+        return model
     }
     
     func copy() -> ClashConfig? {

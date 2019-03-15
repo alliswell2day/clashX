@@ -19,21 +19,22 @@ class JsBridgeUtil {
         
         // 文件存储
         bridge.registerHandler("readConfigString") {(anydata, responseCallback) in
-            let configData = NSData(contentsOfFile: kDefaultConfigFilePath) ?? NSData()
+            let configData = NSData(contentsOfFile: kCurrentConfigPath) ?? NSData()
             let configStr = String(data: configData as Data, encoding: .utf8) ?? ""
             responseCallback?(configStr)
         }
         
         bridge.registerHandler("writeConfigWithString") {(anydata, responseCallback) in
+            guard let str = anydata as? String else {
+                responseCallback?(false)
+                return
+            }
             do {
-                if let str = anydata as? String {
-                    if (FileManager.default.fileExists(atPath: kDefaultConfigFilePath)) {
-                        try? FileManager.default.removeItem(at: URL(fileURLWithPath: kDefaultConfigFilePath))
-                    }
-                    try str.write(to: URL(fileURLWithPath: kDefaultConfigFilePath), atomically: true, encoding: .utf8)
-                } else {
-                    responseCallback?(false)
+                if (FileManager.default.fileExists(atPath: kCurrentConfigPath)) {
+                    try FileManager.default.removeItem(at: URL(fileURLWithPath: kCurrentConfigPath))
                 }
+                try str.write(to: URL(fileURLWithPath: kCurrentConfigPath), atomically: true, encoding: .utf8)
+                
             } catch {
                 responseCallback?(false)
             }
@@ -61,12 +62,6 @@ class JsBridgeUtil {
                 responseCallback?(false)
             }
         }
-        
-        bridge.registerHandler("QRcodesFromScreen") {(anydata, responseCallback) in
-            let urls = QRCodeUtil.ScanQRCodeOnScreen()
-            responseCallback?(urls)
-        }
-   
         
         // 剪贴板
         bridge.registerHandler("setPasteboard") {(anydata, responseCallback) in
@@ -99,18 +94,33 @@ class JsBridgeUtil {
         bridge.registerHandler("speedTest") { (anydata, responseCallback) in
             if let proxyName = anydata as? String {
                 ApiRequest.getProxyDelay(proxyName: proxyName) { (delay) in
-                    SpeedDataRecorder.shared.speedDict[proxyName] = delay
-                    responseCallback?(delay)
+                    var resp:Int
+                    if delay == Int.max {
+                        resp = 0
+                    } else {
+                        resp = delay
+                    }
+                    SpeedDataRecorder.shared.setDelay(proxyName, delay: delay)
+                    responseCallback?(resp)
                 }
             } else {
                 responseCallback?(nil)
             }
         }
         
+        bridge.registerHandler("apiInfo") { (_, callback) in
+            let data = [
+                "host":"127.0.0.1",
+                "port":ConfigManager.shared.apiPort,
+                "secret":ConfigManager.shared.apiSecret
+            ]
+            callback?(data)
+        }
+        
         
         // ping-pong
-        bridge.registerHandler("ping"){ (anydata, responseCallback) in
-            bridge.callHandler("pong")
+        bridge.registerHandler("ping"){ [weak bridge] (anydata, responseCallback) in
+            bridge?.callHandler("pong")
             responseCallback?(true)
         }
         return bridge

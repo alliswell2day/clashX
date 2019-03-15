@@ -108,7 +108,7 @@
 "WQk-kX-Jr8.headerCell.title" = "代理";
 
 /* Class = "NSMenuItem"; title = "Dashboard (dev)"; ObjectID = "XG6-2M-PNi"; */
-"XG6-2M-PNi.title" = "Dashboard (dev)";
+"XG6-2M-PNi.title" = "控制台";
 
 /* Class = "NSMenuItem"; title = "DEBUG"; ObjectID = "XIR-Go-fWA"; */
 "XIR-Go-fWA.title" = "DEBUG";
@@ -172,3 +172,7 @@
 
 /* Class = "NSMenu"; title = "Log level"; ObjectID = "dcz-b4-hVy"; */
 "jdX-Cx-5pe.title" = "切换配置文件";
+
+/* Class = "NSMenuItem"; title = "SpeedTest"; ObjectID = "COu-UX-bww"; */
+"COu-UX-bww.title" = "测速";
+
